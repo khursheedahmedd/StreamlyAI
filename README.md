@@ -162,9 +162,14 @@ curl -X POST http://localhost:5000/query \
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## License
+## License & Usage
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+**All code, models, and assets in this repository are the exclusive property of the Privify team.**
+
+> **No one is permitted to use, copy, modify, distribute, or sublicense any part of this codebase, in whole or in part, for any purpose without the explicit written consent of the authors. Unauthorized use is strictly prohibited and may result in legal action.**
+
+For licensing, partnership, or commercial inquiries, please contact:  
+**[khursheed6577@gmail.com]**
 
 ## Support
 
