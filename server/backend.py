@@ -36,6 +36,9 @@ COHERE_API_KEY = os.getenv('COHERE_API_KEY')
 ASSEMBLYAI_API_KEY = os.getenv('ASSEMBLYAI_API_KEY')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
+# Cohere model configuration
+COHERE_MODEL = "embed-english-v3.0"  # Default embedding model for Cohere
+
 # Validate required API keys
 missing_keys = []
 if not ASSEMBLYAI_API_KEY:
@@ -63,16 +66,14 @@ else:
 PROMPT_TEMPLATE = """
 You are an AI assistant helping users explore and understand video content. You have access to the video transcript and the conversation history.
 
-IMPORTANT GUIDELINES:
-- Provide direct, concise answers to questions
-- Focus on the specific information requested
-- Use the video transcript as your primary source
-- Use your own if user ask question outside the  video transcript
-- If the question refers to previous context, acknowledge it briefly
-- Be helpful but avoid unnecessary conversational filler
-- If information is not in the transcript, say so clearly
-- Keep responses focused and to the point
-- Don't ramble or add unnecessary commentary
+CRITICAL INSTRUCTIONS:
+- You MUST answer based on the video transcript provided below
+- The transcript contains the actual content from the video
+- Do NOT say you don't have access to the video or ask for the video link
+- Use ONLY the information from the transcript to answer questions
+- If the question is about the video content, reference specific parts of the transcript
+- If information is not in the transcript, say "Based on the transcript, I don't see information about [topic]"
+- Be direct and concise in your responses
 
 VIDEO TRANSCRIPT:
 {context}
@@ -82,7 +83,7 @@ CONVERSATION HISTORY:
 
 CURRENT QUESTION: {question}
 
-Provide a direct and helpful answer:"""
+Answer based on the video transcript above:"""
 
 JOBS_DIR = os.path.join(os.path.dirname(__file__), 'jobs')
 os.makedirs(JOBS_DIR, exist_ok=True)
@@ -321,8 +322,16 @@ def embed_transcription(timestamps, job_id):
 
         # Initialize embeddings (using CohereEmbeddings if COHERE_API_KEY is available, else HuggingFace)
         if COHERE_API_KEY:
-            embeddings = CohereEmbeddings(cohere_api_key=COHERE_API_KEY)
-            print(f"[{job_id}] Using CohereEmbeddings for RAG.")
+            try:
+                embeddings = CohereEmbeddings(
+                    cohere_api_key=COHERE_API_KEY,
+                    model=COHERE_MODEL
+                )
+                print(f"[{job_id}] Using CohereEmbeddings for RAG.")
+            except Exception as e:
+                print(f"[{job_id}] [WARNING] CohereEmbeddings failed: {e}")
+                print(f"[{job_id}] Falling back to HuggingFaceEmbeddings")
+                embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         else:
             embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
             print(f"[{job_id}] Using HuggingFaceEmbeddings for RAG.")
@@ -749,12 +758,51 @@ def retrieve_context_from_chroma(job_id, query_text):
 
         # Initialize embeddings (same as used in embed_transcription)
         if COHERE_API_KEY:
-            embeddings = CohereEmbeddings(cohere_api_key=COHERE_API_KEY)
+            try:
+                embeddings = CohereEmbeddings(
+                    cohere_api_key=COHERE_API_KEY,
+                    model=COHERE_MODEL
+                )
+            except Exception as e:
+                print(f"[WARNING] CohereEmbeddings failed: {e}")
+                print("[INFO] Falling back to HuggingFaceEmbeddings")
+                embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         else:
             embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-        # Load the existing Chroma vector store
-        vectorstore = Chroma(persist_directory=chroma_path, embedding_function=embeddings)
+        # Try to load the existing Chroma vector store
+        try:
+            vectorstore = Chroma(persist_directory=chroma_path, embedding_function=embeddings)
+            # Test if the embeddings work with the existing collection
+            test_query = "test"
+            vectorstore.similarity_search(test_query, k=1)
+        except Exception as e:
+            if "dimension" in str(e).lower():
+                print(f"[{job_id}] [WARNING] Embedding dimension mismatch detected. Recreating ChromaDB collection...")
+                # Remove the existing collection and recreate it
+                import shutil
+                try:
+                    shutil.rmtree(chroma_path)
+                    print(f"[{job_id}] Removed old ChromaDB collection")
+                except Exception as cleanup_error:
+                    print(f"[{job_id}] [WARNING] Failed to clean up old collection: {cleanup_error}")
+                
+                # Re-embed the transcription with the current embedding model
+                job = load_job(job_id)
+                if job and job.get('timestamps'):
+                    print(f"[{job_id}] Re-embedding transcription with current model...")
+                    success = embed_transcription(split_words_into_sentences(job['timestamps']), job_id)
+                    if success:
+                        vectorstore = Chroma(persist_directory=chroma_path, embedding_function=embeddings)
+                    else:
+                        print(f"[{job_id}] [ERROR] Failed to re-embed transcription")
+                        return [], "", []
+                else:
+                    print(f"[{job_id}] [ERROR] No transcription data available for re-embedding")
+                    return [], "", []
+            else:
+                # Re-raise the error if it's not a dimension issue
+                raise e
 
         # Perform similarity search to retrieve relevant chunks
         # We'll retrieve top 8 relevant chunks (increased from 4)
@@ -768,6 +816,8 @@ def retrieve_context_from_chroma(job_id, query_text):
         } for doc in retrieved_docs if doc.metadata.get("start_time") is not None]
         
         print(f"[{job_id}] Retrieved {len(retrieved_docs)} documents for query.")
+        print(f"[{job_id}] Retrieved context length: {len(context_text)} characters")
+        print(f"[{job_id}] Retrieved context preview: {context_text[:300]}...")
         return retrieved_docs, context_text, sources
     except Exception as e:
         print(f"[ERROR] Error retrieving from ChromaDB: {e}")
@@ -996,15 +1046,22 @@ def query():
         # Fallback: If context is too short, use full transcript or concatenated topic texts
         if not context_text or len(context_text.split()) < 40:
             print(f"[{job_id}] Fallback: Using full transcript or topics as context.")
+            print(f"[{job_id}] Original context length: {len(context_text.split()) if context_text else 0} words")
+            
             # Prefer concatenated topic texts if available
             topics = job.get('topics')
             if topics and isinstance(topics, list):
                 context_text = "\n\n---\n\n".join([t.get('text', '') for t in topics if t.get('text')])
+                print(f"[{job_id}] Using topics as fallback, {len(topics)} topics found")
             else:
                 context_text = job.get('transcription', '')
+                print(f"[{job_id}] Using full transcription as fallback, length: {len(context_text)} characters")
 
         if not context_text:
+            print(f"[{job_id}] ERROR: No context available at all!")
             return jsonify({"response": "I could not find relevant information in the transcript to answer your question."})
+        
+        print(f"[{job_id}] Final context length: {len(context_text.split())} words")
 
         # 2. Prepare conversation history
         conversation_history = job.get('conversation_history', [])
@@ -1023,16 +1080,16 @@ def query():
         else:
             conversation_text = "No previous conversation."
 
-        # 3. Check if it's a simple greeting
+        # 3. Check if it's a simple greeting (but be more restrictive)
         greeting_keywords = ['hello', 'hey', 'hi', 'good morning', 'good afternoon', 'good evening', 'greetings']
-        is_greeting = any(keyword in question.lower() for keyword in greeting_keywords)
+        is_greeting = any(keyword in question.lower() for keyword in greeting_keywords) and len(question.split()) <= 3
         
         # 4. Prepare prompt for LLM (Groq)
         if is_greeting:
             # Use a simpler, more friendly prompt for greetings
-            greeting_prompt = f"""You are a helpful AI assistant. The user said: "{question}"
+            greeting_prompt = f"""You are a helpful AI assistant for video content. The user said: "{question}"
 
-Respond briefly and warmly. Mention you're here to help with video content questions.
+Respond briefly and warmly. Mention you're here to help with questions about the video content.
 
 Response:"""
             prompt = greeting_prompt
@@ -1044,14 +1101,35 @@ Response:"""
                 question=question
             )
         
+        # Debug logging to see what context is being passed
+        context_length = len(context_text.split()) if context_text else 0
+        context_sample = context_text[:200] + "..." if context_text and len(context_text) > 200 else context_text
+        print(f"[{job_id}] Context length: {context_length} words")
+        print(f"[{job_id}] Context sample: {context_sample}")
+        print(f"[{job_id}] Question: {question}")
+        print(f"[{job_id}] Is greeting: {is_greeting}")
+        
+        # Log the full prompt for debugging
+        if not is_greeting:
+            print(f"[{job_id}] Full prompt preview: {prompt[:500]}...")
+        
         print(f"[{job_id}] Prompt sent to LLM with conversation history")
 
         # 4. Generate answer using Groq Llama-3
+        if is_greeting:
+            messages = [
+                {"role": "user", "content": prompt}
+            ]
+        else:
+            # Use system message to reinforce instructions
+            messages = [
+                {"role": "system", "content": "You are an AI assistant that answers questions based on video transcripts. Always use the provided transcript content to answer questions."},
+                {"role": "user", "content": prompt}
+            ]
+        
         completion = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant", # Using Groq's fastest model for quick responses
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
+            messages=messages,
             max_tokens=1024, # Increased max tokens for fuller answers
             temperature=0.7
         )
@@ -1145,6 +1223,28 @@ def get_library():
     except Exception as e:
         print(f"[ERROR] Error fetching library: {e}")
         return jsonify({"error": "Failed to fetch library"}), 500
+
+@app.route('/debug_job/<job_id>', methods=['GET'])
+def debug_job(job_id):
+    """Debug endpoint to check job data"""
+    job = load_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    
+    debug_info = {
+        "job_id": job_id,
+        "status": job.get('status'),
+        "has_transcription": bool(job.get('transcription')),
+        "transcription_length": len(job.get('transcription', '')),
+        "has_timestamps": bool(job.get('timestamps')),
+        "timestamps_count": len(job.get('timestamps', [])),
+        "has_topics": bool(job.get('topics')),
+        "topics_count": len(job.get('topics', [])),
+        "chroma_exists": os.path.exists(os.path.join(CHROMA_BASE_PATH, job_id)),
+        "transcription_preview": job.get('transcription', '')[:500] + "..." if job.get('transcription') else None
+    }
+    
+    return jsonify(debug_info)
 
 @app.route('/delete_job', methods=['POST'])
 def delete_job():

@@ -171,6 +171,52 @@ curl -X POST http://localhost:5000/query \
 For licensing, partnership, or commercial inquiries, please contact:  
 **[khursheed6577@gmail.com]**
 
+## Troubleshooting
+
+### ChromaDB Dimension Mismatch Error
+
+If you see an error like `Embedding dimension 1024 does not match collection dimensionality 384`, this means you have old ChromaDB collections created with a different embedding model. The system will automatically handle this by:
+
+1. **Automatic Recovery**: The system will detect the mismatch and automatically recreate the ChromaDB collection
+2. **Re-embedding**: It will re-embed the transcription with the current embedding model
+3. **Fallback**: If re-embedding fails, it will use the full transcript for Q&A
+
+### Manual Cleanup (Optional)
+
+If you want to start fresh with all ChromaDB collections:
+
+```bash
+cd server
+python cleanup_chroma.py check    # Check current status
+python cleanup_chroma.py cleanup  # Remove all collections
+```
+
+This will:
+
+- Backup your job metadata
+- Remove all ChromaDB collections
+- Allow you to start fresh with the correct embedding dimensions
+
+### Environment Variables Not Working
+
+If you're getting API key errors:
+
+1. **Check your `.env` file**:
+
+   ```bash
+   cd server
+   python setup_env.py validate
+   ```
+
+2. **Recreate your environment**:
+
+   ```bash
+   cd server
+   python setup_env.py
+   ```
+
+3. **Verify API keys are valid** by testing them in their respective dashboards
+
 ## Support
 
 If you encounter any issues or have questions, please open an issue on GitHub or contact the development team.

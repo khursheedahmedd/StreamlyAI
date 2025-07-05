@@ -103,7 +103,46 @@ public
 .out
 .storybook-out
 
-# Temporary folders
+# Temporary folder
+# Large media files (these should not be in version control)
+*.mp4
+*.mp3
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.mkv
+*.m4v
+*.3gp
+*.wav
+*.flac
+*.aac
+*.ogg
+*.wma
+
+# Job files and processed content
+server/jobs/*.mp3
+server/jobs/*.mp4
+server/jobs/*.wav
+server/jobs/*.flac
+
+# Chroma database files (these can be regenerated)
+server/Chroma/
+s# Keep only the structure, not the actual data
+!server/jobs/*.json
+!server/jobs/*.txt
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*.old
+
 tmp/
 temp/
 
@@ -150,5 +189,3 @@ celerybeat.pid
 .mypy_cache/
 .dmypy.json
 dmypy.json 
-
-*.mp4

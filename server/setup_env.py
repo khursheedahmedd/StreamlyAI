@@ -39,6 +39,8 @@ def create_env_file():
         return
     
     cohere_key = input("Enter your Cohere API key (optional, press Enter to skip): ").strip()
+    print("Note: Cohere API key is optional but recommended for better embeddings.")
+    print("If provided, the system will use 'embed-english-v3.0' model for embeddings.")
     
     # Create .env content
     env_content = f"""# StreamlyAI Environment Variables
