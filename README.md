@@ -164,7 +164,7 @@ curl -X POST http://localhost:5000/query \
 
 ## License & Usage
 
-**All code, models, and assets in this repository are the exclusive property of the Privify team.**
+**All code, models, and assets in this repository are the exclusive property of the StreamlyAI team.**
 
 > **No one is permitted to use, copy, modify, distribute, or sublicense any part of this codebase, in whole or in part, for any purpose without the explicit written consent of the authors. Unauthorized use is strictly prohibited and may result in legal action.**
 
