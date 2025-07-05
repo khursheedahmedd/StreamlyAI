@@ -32,11 +32,32 @@ CORS(app)
 load_dotenv()
 
 # Initialize API keys and paths
-# COHERE_API_KEY = "BjJwK9jegTX0DzKIHK3LD44Q9yfBTrnz4qO453la"
-COHERE_API_KEY = os.getenv('BjJwK9jegTX0DzKIHK3LD44Q9yfBTrnz4qO453la')
+COHERE_API_KEY = os.getenv('COHERE_API_KEY')
+ASSEMBLYAI_API_KEY = os.getenv('ASSEMBLYAI_API_KEY')
+GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+
+# Validate required API keys
+missing_keys = []
+if not ASSEMBLYAI_API_KEY:
+    missing_keys.append("ASSEMBLYAI_API_KEY")
+if not GROQ_API_KEY:
+    missing_keys.append("GROQ_API_KEY")
+
+if missing_keys:
+    print(f"[ERROR] Missing required environment variables: {', '.join(missing_keys)}")
+    print("[INFO] Please run: python setup_env.py")
+    print("[INFO] Or create a .env file with the required API keys")
+    print("[INFO] See README.md for setup instructions")
+    # Don't exit here, let the app start but warn about missing functionality
+
 CHROMA_BASE_PATH = "./Chroma"
 DATA_PATH = "."  # Directory for Markdown file
-aai.settings.api_key = "2a09277c23684af9b374eea68ed5613a"
+
+# Set AssemblyAI API key
+if ASSEMBLYAI_API_KEY:
+    aai.settings.api_key = ASSEMBLYAI_API_KEY
+else:
+    print("[WARNING] ASSEMBLYAI_API_KEY not set - transcription features will not work")
 
 # PROMPT_TEMPLATE for general QA with conversation context
 PROMPT_TEMPLATE = """
@@ -66,13 +87,17 @@ Provide a direct and helpful answer:"""
 JOBS_DIR = os.path.join(os.path.dirname(__file__), 'jobs')
 os.makedirs(JOBS_DIR, exist_ok=True)
 
-GROQ_API_KEY = "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"
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Topic Segmentation and Labeling
 segmenter_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+# Initialize Groq client only if API key is available
+groq_client = None
+if GROQ_API_KEY:
+    groq_client = Groq(api_key=GROQ_API_KEY)
+else:
+    print("[WARNING] GROQ_API_KEY not found - some features may not work")
 
 # Initialize Whisper model for fallback transcription
 whisper_model = None
