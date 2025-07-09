@@ -27,7 +27,7 @@ A powerful AI-powered video transcription and analysis platform that transforms 
 1. **Clone the repository**
 
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/khursheedahmedd/StreamlyAI.git
    cd StreamlyAI
    ```
 
